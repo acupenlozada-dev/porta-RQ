@@ -49,10 +49,14 @@ st.markdown('<div class="main-header"><h3>PORTA · CONTROL DE REQUISICIONES Y RE
 @st.cache_data(ttl=600)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Importante: Nombre exacto de la pestaña dentro de tu Google Sheet
-    df = conn.read(worksheet="RQ")
     
-    # Formateo y tipado de columnas para evitar errores de búsqueda o cálculo
+    # Intenta leer la pestaña 'DB_REQUISICIONES'; si no existe o falla, lee la primera hoja disponible
+    try:
+        df = conn.read(worksheet="DB_REQUISICIONES")
+    except Exception:
+        df = conn.read() # Lee la primera pestaña del archivo
+    
+    # Limpieza de columnas
     if 'RequisicionNumero' in df.columns:
         df['RequisicionNumero'] = df['RequisicionNumero'].astype(str).str.zfill(10)
     if 'Item' in df.columns:
@@ -61,20 +65,12 @@ def load_data():
     df['CantidadPedida'] = pd.to_numeric(df.get('CantidadPedida', 0), errors='coerce').fillna(0)
     df['CantidadRecibida'] = pd.to_numeric(df.get('CantidadRecibida', 0), errors='coerce').fillna(0)
     
-    # Rellenar valores nulos en columnas de texto clave
     cols_texto = ['GuiaNumero', 'NT', 'SituacionRQ', 'NombreAlmacenDestinoRQ', 'NombreAlmacenOrigenRQ', 'Descripcion', 'EstadoDetalle']
     for col in cols_texto:
         if col in df.columns:
             df[col] = df[col].fillna("-").astype(str)
             
     return df
-
-try:
-    df_raw = load_data()
-except Exception as e:
-    st.error(f"Error al conectar con Google Sheets: {e}")
-    st.info("Asegúrate de haber guardado el archivo 'secrets.toml' en Render y haber compartido el Google Sheet con el correo de la Service Account.")
-    st.stop()
 
 # ---------------------------------------------------------
 # 4. FILTROS Y BARRA LATERAL (SIDEBAR)
