@@ -50,7 +50,7 @@ st.markdown('<div class="main-header"><h3>PORTA · CONTROL DE REQUISICIONES Y RE
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     # Importante: Nombre exacto de la pestaña dentro de tu Google Sheet
-    df = conn.read(worksheet="DB_REQUISICIONES")
+    df = conn.read(worksheet="RQ")
     
     # Formateo y tipado de columnas para evitar errores de búsqueda o cálculo
     if 'RequisicionNumero' in df.columns:
