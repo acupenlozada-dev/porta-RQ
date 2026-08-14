@@ -47,9 +47,9 @@ st.markdown('<div class="main-header"><h3>PORTA · CONTROL DE REQUISICIONES Y RE
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Intenta leer 'DB_REQUISICIONES', si falla lee la primera hoja
+    # Intenta leer 'DB_REQUISICIONES', si falla lee la primera hoja por defecto
     try:
-        df = conn.read(worksheet="RQ")
+        df = conn.read(worksheet="DB_REQUISICIONES")
     except Exception:
         df = conn.read()
     
@@ -69,7 +69,7 @@ def load_data():
             
     return df
 
-# Carga de la variable ANTES de construir el Sidebar
+# Carga de datos antes de renderizar la barra lateral
 try:
     df_raw = load_data()
 except Exception as e:
@@ -164,4 +164,24 @@ else:
         destino = df_rq['NombreAlmacenDestinoRQ'].iloc[0]
         guia = df_rq['GuiaNumero'].iloc[0]
         f_rq = df_rq['FechaRQ'].iloc[0] if 'FechaRQ' in df_rq.columns else "-"
-        tot_items = df_rq['Item'].
+        tot_items = df_rq['Item'].nunique()
+        tot_ped = int(df_rq['CantidadPedida'].sum())
+        
+        status_icon = "🔵" if situacion == "Cargado" else "🟡" if situacion == "En Ruta" else "🟢" if situacion == "Recibido" else "⚪"
+        expander_title = f"{status_icon} RQ: {rq} | {destino} | Estado: {situacion} | Guía: {guia} | Pedido: {tot_ped} Uds | SKUs: {tot_items}"
+        
+        with st.expander(expander_title, expanded=False):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.caption(f"**Fecha RQ:** {f_rq}")
+            c2.caption(f"**Nº Guía:** {guia}")
+            c3.caption(f"**Origen:** {df_rq['NombreAlmacenOrigenRQ'].iloc[0] if 'NombreAlmacenOrigenRQ' in df_rq.columns else '-'}")
+            c4.caption(f"**NT:** {df_rq['NT'].iloc[0] if 'NT' in df_rq.columns else '-'}")
+            
+            cols_show = ['Secuencia', 'Item', 'Descripcion', 'CantidadPedida', 'CantidadRecibida', 'EstadoDetalle']
+            cols_exist = [c for c in cols_show if c in df_rq.columns]
+            
+            st.dataframe(
+                df_rq[cols_exist].sort_values(by='Secuencia' if 'Secuencia' in df_rq.columns else 'Item'),
+                use_container_width=True,
+                hide_index=True
+            )
