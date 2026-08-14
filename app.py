@@ -41,19 +41,18 @@ st.markdown("""
 st.markdown('<div class="main-header"><h3>PORTA · CONTROL DE REQUISICIONES Y REPOSICIÓN</h3></div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 3. CARGA Y LIMPIEZA DE DATOS (GOOGLE SHEETS)
+# 3. CARGA Y OPTIMIZACIÓN VECTORIAL DE DATOS
 # ---------------------------------------------------------
 @st.cache_data(ttl=600)
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Intenta leer 'DB_REQUISICIONES', si falla lee la primera hoja por defecto
     try:
         df = conn.read(worksheet="DB_REQUISICIONES")
     except Exception:
         df = conn.read()
     
-    # Formateo y tipado de columnas
+    # Formateo ultra-rápido vectorizado
     if 'RequisicionNumero' in df.columns:
         df['RequisicionNumero'] = df['RequisicionNumero'].astype(str).str.zfill(10)
     if 'Item' in df.columns:
@@ -66,10 +65,17 @@ def load_data():
     for col in cols_texto:
         if col in df.columns:
             df[col] = df[col].fillna("-").astype(str)
+
+    # Columna unificada para búsquedas ultrarrápidas
+    df['_search_text'] = (
+        df.get('Item', '') + " " + 
+        df.get('Descripcion', '') + " " + 
+        df.get('RequisicionNumero', '') + " " + 
+        df.get('GuiaNumero', '')
+    ).str.lower()
             
     return df
 
-# Carga de datos antes de renderizar la barra lateral
 try:
     df_raw = load_data()
 except Exception as e:
@@ -83,14 +89,12 @@ except Exception as e:
 with st.sidebar:
     st.header("⚙️ Filtros de Selección")
     
-    # 1. Filtro Principal: Tienda Destino
     tiendas_disponibles = sorted([t for t in df_raw['NombreAlmacenDestinoRQ'].unique() if t != "-"])
     tienda_selected = st.selectbox(
         "🏪 Seleccionar Tienda Destino:",
         options=["-- TODAS LAS TIENDAS --"] + tiendas_disponibles
     )
     
-    # 2. Filtro Secundario: Estado / Situación de Requisición
     situaciones_disp = sorted(df_raw['SituacionRQ'].unique())
     situacion_selected = st.multiselect(
         "📦 Situación RQ:",
@@ -98,11 +102,14 @@ with st.sidebar:
         default=situaciones_disp
     )
     
-    # 3. Buscador General
-    search_query = st.text_input("🔍 Buscar SKU, Descripción, RQ o Guía:", "").strip()
+    search_query = st.text_input("🔍 Buscar SKU, Descripción, RQ o Guía:", "").strip().lower()
     
     st.divider()
     
+    # Límite de paginación para mantener velocidad
+    items_per_page = st.selectbox("⚡ Requisiciones a mostrar por página:", [10, 20, 50, 100], index=1)
+    
+    st.divider()
     if st.button("🔄 Actualizar Datos", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -119,13 +126,7 @@ if situacion_selected:
     df_filtered = df_filtered[df_filtered['SituacionRQ'].isin(situacion_selected)]
 
 if search_query:
-    q = search_query.lower()
-    df_filtered = df_filtered[
-        df_filtered['Item'].str.lower().str.contains(q) |
-        df_filtered['Descripcion'].str.lower().str.contains(q) |
-        df_filtered['RequisicionNumero'].str.lower().str.contains(q) |
-        df_filtered['GuiaNumero'].str.lower().str.contains(q)
-    ]
+    df_filtered = df_filtered[df_filtered['_search_text'].str.contains(search_query, na=False)]
 
 # ---------------------------------------------------------
 # 6. RESUMEN DE METRICAS (KPIS)
@@ -135,6 +136,8 @@ m1, m2, m3, m4, m5 = st.columns(5)
 total_rqs = df_filtered['RequisicionNumero'].nunique()
 cant_pedida = df_filtered['CantidadPedida'].sum()
 cant_recibida = df_filtered['CantidadRecibida'].sum()
+
+# Filtrado rápido de métricas
 en_ruta = df_filtered[df_filtered['SituacionRQ'] == 'En Ruta']['CantidadPedida'].sum()
 cargados = df_filtered[df_filtered['SituacionRQ'] == 'Cargado']['CantidadPedida'].sum()
 
@@ -147,17 +150,36 @@ m5.metric("🟢 Recibido", f"{int(cant_recibida):,}")
 st.divider()
 
 # ---------------------------------------------------------
-# 7. VISTA DETALLADA POR REQUISICIÓN (DESPLEGABLES)
+# 7. VISTA DETALLADA POR REQUISICIÓN (PAGINADA PARA MÁXIMA VELOCIDAD)
 # ---------------------------------------------------------
 st.subheader("📋 Detalle de Cargas por Requisición")
 
 if df_filtered.empty:
     st.warning("No se encontraron requisiciones que coincidan con los filtros seleccionados.")
 else:
-    rq_groups = df_filtered.groupby('RequisicionNumero')
-    sorted_rqs = sorted(rq_groups.groups.keys(), reverse=True)
+    # Agrupar por RQ y ordenar
+    sorted_rqs = sorted(df_filtered['RequisicionNumero'].unique(), reverse=True)
+    total_pages = (len(sorted_rqs) - 1) // items_per_page + 1
 
-    for rq in sorted_rqs:
+    # Controles de Paginación si hay más de 1 página
+    if total_pages > 1:
+        col_p1, col_p2 = st.columns([1, 4])
+        page = col_p1.number_input(f"Página (1 de {total_pages})", min_value=1, max_value=total_pages, value=1, step=1)
+    else:
+        page = 1
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+    visible_rqs = sorted_rqs[start_idx:end_idx]
+
+    # Filtrar solo la data necesaria para las RQ visibles
+    df_visible = df_filtered[df_filtered['RequisicionNumero'].isin(visible_rqs)]
+    rq_groups = df_visible.groupby('RequisicionNumero')
+
+    for rq in visible_rqs:
+        if rq not in rq_groups.groups:
+            continue
+            
         df_rq = rq_groups.get_group(rq)
         
         situacion = df_rq['SituacionRQ'].iloc[0]
